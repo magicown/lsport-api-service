@@ -1,0 +1,11 @@
+# 배포 스크립트 (서버 크레덴셜 포함)
+upload*.py
+upload_step*.py
+
+# 테스트 스크립트 (크레덴셜 포함)
+e2e_test*
+e2e_test*.py
+e2e_test*.sh
+
+# 내부 작업 문서
+작업내역.md

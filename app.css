@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+/* Twilight Dark Theme - Custom Properties */
+@theme {
+  --color-tw-body: #353C48;
+  --color-tw-card: #303641;
+  --color-tw-darker: #252A32;
+  --color-tw-border: #50596A;
+  --color-tw-text: #B4BFD5;
+  --color-tw-text-muted: #8891A5;
+  --color-tw-text-bright: #FFFFFF;
+  --color-tw-accent: #20A1D0;
+  --color-tw-accent-hover: #1791BD;
+  --color-tw-success: #04A777;
+  --color-tw-danger: #FE5F55;
+  --color-tw-warning: #FFC857;
+  --color-tw-highlight: #3F4653;
+}
+
+/* Global Styles */
+body {
+  background-color: #353C48;
+  color: #B4BFD5;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #252A32; }
+::-webkit-scrollbar-thumb { background: #50596A; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #6B7585; }
