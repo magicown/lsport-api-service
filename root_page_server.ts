@@ -34,6 +34,9 @@ export const load: PageServerLoad = async ({ locals }) => {
     };
   });
 
+  // 데이터가 많은 순으로 정렬
+  sportsData.sort((a, b) => (b.prematch + b.inplay) - (a.prematch + a.inplay));
+
   const totalPrematch = sportsData.reduce((sum, s) => sum + s.prematch, 0);
   const totalInplay = sportsData.reduce((sum, s) => sum + s.inplay, 0);
   const totalSpecial = sportsData.reduce((sum, s) => sum + s.special, 0);

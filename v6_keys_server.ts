@@ -17,7 +17,7 @@ export const GET: RequestHandler = async ({ locals }) => {
   }
 
   const keys = dbAll<any>(
-    'SELECT id, key_prefix, label, is_active, last_used_at, created_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC',
+    'SELECT id, key_prefix, label, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC',
     userId
   );
 
@@ -28,6 +28,8 @@ export const GET: RequestHandler = async ({ locals }) => {
       prefix: k.key_prefix + '...',
       label: k.label,
       active: !!k.is_active,
+      expires_at: k.expires_at || null,
+      expired: k.expires_at ? k.expires_at < Date.now() : false,
       last_used_at: k.last_used_at,
       created_at: k.created_at,
     })),
@@ -58,17 +60,21 @@ export const POST: RequestHandler = async ({ locals, request }) => {
   }
 
   let label = 'Default';
+  let expiresInDays: number | null = null;
   try {
     const body = await request.json();
     if (body.label) label = String(body.label).slice(0, 50);
+    if (body.expiresInDays && Number.isInteger(body.expiresInDays) && body.expiresInDays > 0) {
+      expiresInDays = Math.min(body.expiresInDays, 365); // 최대 1년
+    }
   } catch { /* body 없어도 OK */ }
 
-  // 키 생성
-  const { fullKey, prefix, hash } = generateApiKey();
+  // 키 생성 (평문은 응답에서만 노출, DB에 저장하지 않음)
+  const { fullKey, prefix, hash, expiresAt } = generateApiKey(expiresInDays);
 
   const insertResult = dbRun(
-    'INSERT INTO api_keys (user_id, key_prefix, key_hash, key_full, label) VALUES (?, ?, ?, ?, ?)',
-    userId, prefix, hash, fullKey, label
+    'INSERT INTO api_keys (user_id, key_prefix, key_hash, label, expires_at) VALUES (?, ?, ?, ?, ?)',
+    userId, prefix, hash, label, expiresAt
   );
 
   const keyId = Number(insertResult.lastInsertRowid);
@@ -85,6 +91,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
       fullKey,
       prefix: prefix + '...',
       label,
+      expires_at: expiresAt,
     },
   }, { status: 201 });
 };

@@ -133,11 +133,14 @@ function transformInplayMatch(raw: any, sport: string): any {
   const market = (raw.od || []).map((od: any) => ({
     market_id: od.m,
     market_name: od.mn || '',
+    stop: od.s || 0,
     list: (od.l || []).map((line: any) => ({
       name: line.n || '',
+      stop: line.s || 0,
       odds: (line.o || []).map((o: any) => ({
         name: o.n || '',
         value: o.v || '',
+        stop: o.s || 0,
       })),
     })),
   }));

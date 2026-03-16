@@ -8,7 +8,10 @@ import { validateApiKey } from '$lib/api-key';
 import { verifyToken } from '$lib/jwt';
 import type { JwtPayload } from '$lib/jwt';
 import { dbGet, dbRun } from '$lib/db';
+import { createLogger } from '$lib/logger';
 import type { PlanType, UserRole } from '$lib/plan-limits';
+
+const log = createLogger('middleware');
 
 export interface AuthResult {
   authenticated: boolean;

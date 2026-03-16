@@ -1,19 +1,24 @@
 /**
  * 슬라이딩 윈도우 레이트 리미터 (인메모리)
  * 분당 요청 수 제한 + 일일 호출 한도
+ * 로깅 + 메모리 관리 개선
  */
 
 import { PLAN_LIMITS, isDailyLimitExceeded } from '$lib/plan-limits';
 import type { PlanType } from '$lib/plan-limits';
 import { dbGet } from '$lib/db';
+import { createLogger } from '$lib/logger';
 
-// 분당 요청 타임스탬프: identifier → timestamp[]
+const log = createLogger('rate-limiter');
+
+// 분당 요청 타임스탬프: identifier -> timestamp[]
 const windowMap = new Map<string, number[]>();
 
-// 일일 카운터: 'daily:{userId}:{date}' → count
+// 일일 카운터: 'daily:{userId}:{date}' -> count
 const dailyCountMap = new Map<string, number>();
 
 const WINDOW_MS = 60_000; // 1분
+const MAX_WINDOW_ENTRIES = 10_000; // 메모리 누수 방지
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -121,10 +126,12 @@ export function cleanupExpiredEntries() {
   const now = Date.now();
   const windowStart = now - WINDOW_MS;
 
+  let removed = 0;
   for (const [key, timestamps] of windowMap) {
     const valid = timestamps.filter(t => t > windowStart);
     if (valid.length === 0) {
       windowMap.delete(key);
+      removed++;
     } else {
       windowMap.set(key, valid);
     }
@@ -138,6 +145,16 @@ export function cleanupExpiredEntries() {
       dailyCountMap.delete(key);
     }
   }
+
+  // 메모리 누수 방지: 엔트리가 너무 많으면 가장 오래된 것부터 제거
+  if (windowMap.size > MAX_WINDOW_ENTRIES) {
+    const excess = windowMap.size - MAX_WINDOW_ENTRIES;
+    const keys = Array.from(windowMap.keys());
+    for (let i = 0; i < excess; i++) {
+      windowMap.delete(keys[i]);
+    }
+    log.warn('Window map overflow, evicted entries', { evicted: excess, total: windowMap.size });
+  }
 }
 
 // 1분마다 정리
@@ -149,4 +166,14 @@ setInterval(cleanupExpiredEntries, 60_000);
 export function getDailyCount(userId: number): number {
   const today = new Date().toISOString().slice(0, 10);
   return dailyCountMap.get(`daily:${userId}:${today}`) || 0;
+}
+
+/**
+ * 현재 메모리 사용 상태 (디버깅용)
+ */
+export function getStats() {
+  return {
+    windowEntries: windowMap.size,
+    dailyEntries: dailyCountMap.size,
+  };
 }

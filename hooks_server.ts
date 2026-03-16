@@ -22,6 +22,7 @@ const SPORT_REGEX = /\/api\/(?:prematch|inplay|special|match|leagues)\/([^/]+)/;
 const PUBLIC_PATHS = [
   '/login',
   '/register',
+  '/docs',
   '/api/health',
   '/api/auth/register',
   '/api/auth/login',
@@ -76,11 +77,11 @@ async function handleApiRequest(
   // 1. 인증
   const auth = await authenticateRequest(event);
   if (!auth.authenticated) {
-    return createErrorResponse(
+    return addStandardHeaders(createErrorResponse(
       auth.error!.code,
       auth.error!.message,
       auth.error!.status
-    );
+    ), event);
   }
 
   // event.locals에 인증 정보 저장
@@ -96,11 +97,14 @@ async function handleApiRequest(
   event.locals.keyId = auth.keyId || null;
   event.locals.role = auth.role!;
 
+  // 웹 UI 내부 fetch (쿠키 세션)는 플랜 제한/레이트 리밋 면제
+  const isWebInternal = auth.method === 'cookie';
+
   // 2. IP 화이트리스트 체크 (API Key 인증일 때만)
   if (auth.method === 'api_key') {
     const ipError = checkIpWhitelist(auth.userId!, auth.plan!, auth.role!, clientIp);
     if (ipError) {
-      return createErrorResponse('PLAN_ACCESS_DENIED', ipError, 403);
+      return addStandardHeaders(createErrorResponse('PLAN_ACCESS_DENIED', ipError, 403), event);
     }
   }
 
@@ -109,38 +113,41 @@ async function handleApiRequest(
   const sportMatch = isData ? path.match(SPORT_REGEX) : null;
   const sport = sportMatch?.[1] || '';
 
-  // 4. 플랜 접근 체크 (데이터 API만)
-  if (isData) {
+  // 4. 플랜 접근 체크 (외부 API만 - 웹 UI 내부 fetch 면제)
+  if (isData && !isWebInternal) {
     const access = checkPlanAccess(auth.plan!, path, sport || undefined);
     if (!access.allowed) {
-      return createErrorResponse(access.code, access.message, 403);
+      return addStandardHeaders(createErrorResponse(access.code, access.message, 403), event);
     }
   }
 
-  // 5. 레이트 리밋 체크
-  const identifier = auth.keyId ? `key:${auth.keyId}` : `user:${auth.userId}`;
-  const rateResult = checkRateLimit(identifier, auth.plan!, auth.userId!);
-  if (!rateResult.allowed) {
-    const headers = getRateLimitHeaders(rateResult);
-    return createErrorResponse(
-      rateResult.code!,
-      rateResult.message!,
-      429,
-      { limit: rateResult.limit, remaining: rateResult.remaining, retryAfter: rateResult.retryAfter },
-      headers
-    );
+  // 5. 레이트 리밋 체크 (외부 API만 - 웹 UI 내부 fetch 면제)
+  let rateResult: any = { allowed: true };
+  if (!isWebInternal) {
+    const identifier = auth.keyId ? `key:${auth.keyId}` : `user:${auth.userId}`;
+    rateResult = checkRateLimit(identifier, auth.plan!, auth.userId!);
+    if (!rateResult.allowed) {
+      const headers = getRateLimitHeaders(rateResult);
+      return addStandardHeaders(createErrorResponse(
+        rateResult.code!,
+        rateResult.message!,
+        429,
+        { limit: rateResult.limit, remaining: rateResult.remaining, retryAfter: rateResult.retryAfter },
+        headers
+      ), event);
+    }
   }
 
   // 6. 요청 처리
   const response = await resolve(event);
 
-  // 7. 성공 시 사용량 추적
-  if (response.status >= 200 && response.status < 400 && isData) {
+  // 7. 성공 시 사용량 추적 (외부 API만)
+  if (!isWebInternal && response.status >= 200 && response.status < 400 && isData) {
     trackRequest(auth.userId!, auth.keyId || null, path, sport);
   }
 
   // 8. 레이트 리밋 + CORS 헤더 추가
-  const rateLimitHeaders = getRateLimitHeaders(rateResult);
+  const rateLimitHeaders = isWebInternal ? {} : getRateLimitHeaders(rateResult);
   const newResponse = new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -161,9 +168,12 @@ async function handleApiRequest(
     }
   }
 
-  // CORS 헤더
+  // CORS + 보안 헤더
   const corsHeaders = getCorsHeaders(event);
   for (const [k, v] of Object.entries(corsHeaders)) {
+    newResponse.headers.set(k, v);
+  }
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
     newResponse.headers.set(k, v);
   }
 
@@ -239,15 +249,33 @@ function getCorsHeaders(event: any): Record<string, string> {
   };
 }
 
-function addCorsHeaders(response: Response, event: any): Response {
+/** 보안 헤더 */
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'X-XSS-Protection': '0',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+};
+
+function addStandardHeaders(response: Response, event: any): Response {
   const newResponse = new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers: new Headers(response.headers),
   });
+  // 보안 헤더
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
+    newResponse.headers.set(k, v);
+  }
+  // CORS 헤더
   const cors = getCorsHeaders(event);
   for (const [k, v] of Object.entries(cors)) {
     newResponse.headers.set(k, v);
   }
   return newResponse;
+}
+
+function addCorsHeaders(response: Response, event: any): Response {
+  return addStandardHeaders(response, event);
 }

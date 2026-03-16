@@ -6,10 +6,25 @@
   let matches: any[] = $state(data.matches || []);
   let sport = $derived(data.sport || 'soccer');
   let selectedMatch: any = $state(null);
+  let detailData: any = $state(null);
+  let loadingDetail = $state(false);
   let searchQuery = $state('');
   let pollTimer: any = null;
   let tickTimer: any = null;
   let tickCount = $state(0);
+
+  // 종목 변경 시 데이터 리셋
+  $effect(() => {
+    void sport;
+    matches = data.matches || [];
+    selectedMatch = null;
+    detailData = null;
+    searchQuery = '';
+    prevOddsMap = new Map();
+    prevScoreMap = new Map();
+    prevMatchIds = new Set();
+    prevStatusMap = new Map();
+  });
 
   const PAUSED_STATUSES = new Set([
     '하프타임', '휴식', '경기종료', '연기', '취소', '중단',
@@ -96,7 +111,14 @@
       matches = newData;
       if (selectedMatch) {
         const updated = newData.find((m: any) => (m.id || m.iid) === (selectedMatch.id || selectedMatch.iid));
-        if (updated) selectedMatch = updated;
+        if (updated) {
+          selectedMatch = updated;
+          // 상세 패널도 주기적으로 갱신
+          try {
+            const dres = await fetch(`/api/match/${sport}/${updated.iid || updated.id}?type=inplay`);
+            if (dres.ok) detailData = await dres.json();
+          } catch {}
+        }
       }
     } catch {}
   }
@@ -112,6 +134,17 @@
     tickTimer = setInterval(() => { tickCount++; }, 1000);
   });
   onDestroy(() => { if (pollTimer) clearInterval(pollTimer); if (tickTimer) clearInterval(tickTimer); });
+
+  async function selectMatch(m: any) {
+    selectedMatch = m;
+    detailData = null;
+    loadingDetail = true;
+    try {
+      const res = await fetch(`/api/match/${sport}/${m.iid || m.id}?type=inplay`);
+      if (res.ok) detailData = await res.json();
+    } catch {}
+    loadingDetail = false;
+  }
 
   let filtered = $derived.by(() => {
     if (!searchQuery) return matches;
@@ -184,7 +217,7 @@
           class="w-full text-left border-b border-tw-border/50 hover:bg-tw-highlight transition-colors
             {newMatchIds.has(mid) ? 'match-enter' : ''} {finished ? 'opacity-50' : ''}"
           class:selected={selectedMatch?.id === m.id || selectedMatch?.iid === m.iid}
-          onclick={() => selectedMatch = m}
+          onclick={() => selectMatch(m)}
         >
           <div class="flex items-center px-3 py-2.5">
             <!-- 왼쪽: 시간/상태 + 팀 -->
@@ -224,22 +257,25 @@
             </div>
             <!-- 오른쪽: 3종 배당 -->
             <div class="flex shrink-0">
-              <div class="flex">
-                <span class="odds-cell {getOddsFlashClass(mid, 'h')} {m.h ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.h || '-'}</span>
-                <span class="odds-cell {getOddsFlashClass(mid, 'd')} {m.d ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.d || '-'}</span>
-                <span class="odds-cell {getOddsFlashClass(mid, 'a')} {m.a ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.a || '-'}</span>
+              <div class="flex {m.ms ? 'stopped-group' : ''}">
+                {#if m.ms}<span class="stop-badge">중지</span>{/if}
+                <span class="odds-cell {m.ms ? 'stopped' : ''} {getOddsFlashClass(mid, 'h')} {m.h ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.h || '-'}</span>
+                <span class="odds-cell {m.ms ? 'stopped' : ''} {getOddsFlashClass(mid, 'd')} {m.d ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.d || '-'}</span>
+                <span class="odds-cell {m.ms ? 'stopped' : ''} {getOddsFlashClass(mid, 'a')} {m.a ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.a || '-'}</span>
               </div>
               <div class="w-px bg-tw-border/40 mx-1"></div>
-              <div class="flex">
-                <span class="odds-cell {getOddsFlashClass(mid, 'hch')} {m.hch ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.hch || '-'}</span>
-                <span class="w-[44px] text-center text-sm font-bold text-tw-warning leading-[44px]">{m.hcl || ''}</span>
-                <span class="odds-cell {getOddsFlashClass(mid, 'hca')} {m.hca ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.hca || '-'}</span>
+              <div class="flex {m.hcs ? 'stopped-group' : ''}">
+                {#if m.hcs}<span class="stop-badge">중지</span>{/if}
+                <span class="odds-cell {m.hcs ? 'stopped' : ''} {getOddsFlashClass(mid, 'hch')} {m.hch ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.hch || '-'}</span>
+                <span class="w-[44px] text-center text-sm font-bold leading-[44px] {m.hcs ? 'text-tw-text-muted/40' : 'text-tw-warning'}">{m.hcl || ''}</span>
+                <span class="odds-cell {m.hcs ? 'stopped' : ''} {getOddsFlashClass(mid, 'hca')} {m.hca ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.hca || '-'}</span>
               </div>
               <div class="w-px bg-tw-border/40 mx-1"></div>
-              <div class="flex">
-                <span class="odds-cell {getOddsFlashClass(mid, 'ouo')} {m.ouo ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.ouo || '-'}</span>
-                <span class="w-[44px] text-center text-sm font-bold text-tw-success leading-[44px]">{m.oul || ''}</span>
-                <span class="odds-cell {getOddsFlashClass(mid, 'ouu')} {m.ouu ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.ouu || '-'}</span>
+              <div class="flex {m.ous ? 'stopped-group' : ''}">
+                {#if m.ous}<span class="stop-badge">중지</span>{/if}
+                <span class="odds-cell {m.ous ? 'stopped' : ''} {getOddsFlashClass(mid, 'ouo')} {m.ouo ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.ouo || '-'}</span>
+                <span class="w-[44px] text-center text-sm font-bold leading-[44px] {m.ous ? 'text-tw-text-muted/40' : 'text-tw-success'}">{m.oul || ''}</span>
+                <span class="odds-cell {m.ous ? 'stopped' : ''} {getOddsFlashClass(mid, 'ouu')} {m.ouu ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.ouu || '-'}</span>
               </div>
             </div>
           </div>
@@ -248,23 +284,34 @@
     {/each}
 
     {#if grouped.length === 0}
-      <div class="text-center text-tw-text-muted py-20 text-lg">진행 중인 경기가 없습니다</div>
+      <div class="text-center text-tw-text-muted py-20 text-lg">
+        {#if searchQuery}검색 결과가 없습니다{:else}진행 중인 인플레이 경기가 없습니다{/if}
+      </div>
     {/if}
   </div>
 
   {#if selectedMatch}
-    <div class="w-[420px] border-l border-tw-border overflow-y-auto bg-tw-card">
-      <MatchDetail match={{
-        id: selectedMatch.id, prematch_id: selectedMatch.pid, inplay_id: selectedMatch.iid,
-        league_name: selectedMatch.ln, league_image: selectedMatch.li,
-        cc_kr: selectedMatch.ck, cc_image: selectedMatch.ci,
-        home_name: selectedMatch.hn, away_name: selectedMatch.an,
-        home_image: selectedMatch.hi, away_image: selectedMatch.ai,
-        status_kr: selectedMatch.sk, time: selectedMatch.t,
-        match_time_str: selectedMatch.mts, match_minute: selectedMatch.mm,
-        score: { home: { score: selectedMatch.sh }, away: { score: selectedMatch.sa } },
-        market: [],
-      }} onclose={() => selectedMatch = null} />
+    <div class="w-1/3 min-w-[380px] border-l border-tw-border overflow-y-auto bg-tw-card">
+      {#if loadingDetail}
+        <div class="text-center text-tw-text-muted py-10">
+          <div class="inline-block w-5 h-5 border-2 border-tw-accent border-t-transparent rounded-full animate-spin"></div>
+          <div class="mt-2 text-sm">로딩 중...</div>
+        </div>
+      {:else if detailData}
+        <MatchDetail match={detailData} onclose={() => { selectedMatch = null; detailData = null; }} />
+      {:else}
+        <MatchDetail match={{
+          id: selectedMatch.id, prematch_id: selectedMatch.pid, inplay_id: selectedMatch.iid,
+          league_name: selectedMatch.ln, league_image: selectedMatch.li,
+          cc_kr: selectedMatch.ck, cc_image: selectedMatch.ci,
+          home_name: selectedMatch.hn, away_name: selectedMatch.an,
+          home_image: selectedMatch.hi, away_image: selectedMatch.ai,
+          status_kr: selectedMatch.sk, time: selectedMatch.t,
+          match_time_str: selectedMatch.mts, match_minute: selectedMatch.mm,
+          score: { home: { score: selectedMatch.sh }, away: { score: selectedMatch.sa } },
+          market: [],
+        }} onclose={() => { selectedMatch = null; detailData = null; }} />
+      {/if}
     </div>
   {/if}
 </div>
@@ -283,6 +330,31 @@
   .odds-cell:hover {
     background-color: rgba(32, 161, 208, 0.25);
     color: #fff;
+  }
+  .odds-cell.stopped {
+    color: rgba(255, 255, 255, 0.2);
+    text-decoration: line-through;
+    pointer-events: none;
+  }
+  .stopped-group {
+    position: relative;
+    opacity: 0.5;
+  }
+  .stop-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    font-size: 10px;
+    font-weight: 700;
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    pointer-events: none;
   }
   :global(.odds-flash-up) { animation: flashUp 1.5s ease-out; }
   @keyframes flashUp {

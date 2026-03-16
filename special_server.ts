@@ -5,10 +5,11 @@ import { getSpecial } from '$lib/api-cache';
 function trimForList(matches: any[]): any[] {
   return matches.map((m: any) => {
     // 첫 번째 스페셜 마켓에서 배당 추출
-    let h = '', d = '', a = '', mn = '';
+    let h = '', d = '', a = '', mn = '', ms = false;
     const mk = (m.market || [])[0];
     if (mk) {
       mn = mk.market_name || '';
+      ms = !!(mk.stop || mk.list?.[0]?.stop);
       if (mk.list?.[0]?.odds) {
         const odds = mk.list[0].odds;
         h = odds[0]?.value || '';
@@ -27,7 +28,7 @@ function trimForList(matches: any[]): any[] {
       hn: m.home_name, an: m.away_name,
       hi: m.home_image || '', ai: m.away_image || '',
       sk: m.status_kr || '', t: m.time || '', tu: m.time_unix || 0,
-      sh, sa, h, d, a, mn,
+      sh, sa, h, d, a, mn, ms,
     };
   });
 }

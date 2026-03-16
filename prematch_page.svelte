@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
   import { onMount, onDestroy } from 'svelte';
   import MatchDetail from '$lib/components/MatchDetail.svelte';
 
@@ -93,11 +93,31 @@
     }
   }
 
+  let retryTimer: any;
+  let retryCount = 0;
+  let dataReady = $state(data.matches?.length > 0);
+
   onMount(() => {
     scrollContainer?.addEventListener('scroll', handleScroll);
+    if (!dataReady) {
+      retryTimer = setInterval(() => {
+        retryCount++;
+        if (retryCount > 12) { clearInterval(retryTimer); retryTimer = null; dataReady = true; return; }
+        invalidateAll();
+      }, 5000);
+    }
   });
   onDestroy(() => {
     scrollContainer?.removeEventListener('scroll', handleScroll);
+    if (retryTimer) clearInterval(retryTimer);
+  });
+
+  $effect(() => {
+    if (matches.length > 0 && !dataReady) dataReady = true;
+    if (filtered.length > 0 && retryTimer) {
+      clearInterval(retryTimer);
+      retryTimer = null;
+    }
   });
 
   async function selectMatch(m: any) {
@@ -207,22 +227,25 @@
             </div>
             <!-- 오른쪽: 3종 배당 -->
             <div class="flex shrink-0">
-              <div class="flex">
-                <span class="odds-cell {m.h ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.h || '-'}</span>
-                <span class="odds-cell {m.d ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.d || '-'}</span>
-                <span class="odds-cell {m.a ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.a || '-'}</span>
+              <div class="flex {m.ms ? 'stopped-group' : ''}">
+                {#if m.ms}<span class="stop-badge">중지</span>{/if}
+                <span class="odds-cell {m.ms ? 'stopped' : m.h ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.h || '-'}</span>
+                <span class="odds-cell {m.ms ? 'stopped' : m.d ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.d || '-'}</span>
+                <span class="odds-cell {m.ms ? 'stopped' : m.a ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.a || '-'}</span>
               </div>
               <div class="w-px bg-tw-border/40 mx-1"></div>
-              <div class="flex">
-                <span class="odds-cell {m.hch ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.hch || '-'}</span>
-                <span class="w-[44px] text-center text-sm font-bold text-tw-warning leading-[44px]">{m.hcl || ''}</span>
-                <span class="odds-cell {m.hca ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.hca || '-'}</span>
+              <div class="flex {m.hcs ? 'stopped-group' : ''}">
+                {#if m.hcs}<span class="stop-badge">중지</span>{/if}
+                <span class="odds-cell {m.hcs ? 'stopped' : m.hch ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.hch || '-'}</span>
+                <span class="w-[44px] text-center text-sm font-bold leading-[44px] {m.hcs ? 'text-tw-text-muted/40' : 'text-tw-warning'}">{m.hcl || ''}</span>
+                <span class="odds-cell {m.hcs ? 'stopped' : m.hca ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.hca || '-'}</span>
               </div>
               <div class="w-px bg-tw-border/40 mx-1"></div>
-              <div class="flex">
-                <span class="odds-cell {m.ouo ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.ouo || '-'}</span>
-                <span class="w-[44px] text-center text-sm font-bold text-tw-success leading-[44px]">{m.oul || ''}</span>
-                <span class="odds-cell {m.ouu ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.ouu || '-'}</span>
+              <div class="flex {m.ous ? 'stopped-group' : ''}">
+                {#if m.ous}<span class="stop-badge">중지</span>{/if}
+                <span class="odds-cell {m.ous ? 'stopped' : m.ouo ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.ouo || '-'}</span>
+                <span class="w-[44px] text-center text-sm font-bold leading-[44px] {m.ous ? 'text-tw-text-muted/40' : 'text-tw-success'}">{m.oul || ''}</span>
+                <span class="odds-cell {m.ous ? 'stopped' : m.ouu ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.ouu || '-'}</span>
               </div>
             </div>
           </div>
@@ -238,12 +261,22 @@
     {/if}
 
     {#if grouped.length === 0}
-      <div class="text-center text-tw-text-muted py-20 text-lg">데이터가 없습니다</div>
+      {#if !dataReady}
+        <div class="text-center py-20">
+          <div class="inline-block w-6 h-6 border-2 border-tw-accent border-t-transparent rounded-full animate-spin mb-3"></div>
+          <div class="text-tw-text-muted text-lg">데이터를 불러오는 중입니다...</div>
+          <div class="text-tw-text-muted text-sm mt-2">잠시만 기다려주세요. 자동으로 갱신됩니다.</div>
+        </div>
+      {:else if searchQuery}
+        <div class="text-center text-tw-text-muted py-20 text-lg">검색 결과가 없습니다</div>
+      {:else}
+        <div class="text-center text-tw-text-muted py-20 text-lg">프리매치 배당이 없습니다</div>
+      {/if}
     {/if}
   </div>
 
   {#if selectedMatch}
-    <div class="w-[420px] border-l border-tw-border overflow-y-auto bg-tw-card">
+    <div class="w-1/3 min-w-[380px] border-l border-tw-border overflow-y-auto bg-tw-card">
       {#if loadingDetail}
         <div class="text-center text-tw-text-muted py-10">
           <div class="inline-block w-5 h-5 border-2 border-tw-accent border-t-transparent rounded-full animate-spin"></div>
@@ -282,5 +315,30 @@
   .odds-cell:hover {
     background-color: rgba(32, 161, 208, 0.25);
     color: #fff;
+  }
+  .odds-cell.stopped {
+    color: rgba(255, 255, 255, 0.2);
+    text-decoration: line-through;
+    pointer-events: none;
+  }
+  .stopped-group {
+    position: relative;
+    opacity: 0.5;
+  }
+  .stop-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    font-size: 10px;
+    font-weight: 700;
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    pointer-events: none;
   }
 </style>

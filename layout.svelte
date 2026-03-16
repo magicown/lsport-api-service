@@ -15,16 +15,16 @@
 
   const SPORTS = [
     { id: 'soccer', name: '축구', icon: '⚽' },
-    { id: 'americanfootball', name: '미식축구', icon: '🏈' },
-    { id: 'boxingufc', name: 'UFC/복싱', icon: '🥊' },
-    { id: 'tennis', name: '테니스', icon: '🎾' },
-    { id: 'baseball', name: '야구', icon: '⚾' },
-    { id: 'icehockey', name: '아이스하키', icon: '🏒' },
     { id: 'basketball', name: '농구', icon: '🏀' },
-    { id: 'handball', name: '핸드볼', icon: '🤾' },
+    { id: 'baseball', name: '야구', icon: '⚾' },
     { id: 'volleyball', name: '배구', icon: '🏐' },
-    { id: 'tabletennis', name: '탁구', icon: '🏓' },
+    { id: 'icehockey', name: '아이스하키', icon: '🏒' },
+    { id: 'tennis', name: '테니스', icon: '🎾' },
+    { id: 'handball', name: '핸드볼', icon: '🤾' },
+    { id: 'americanfootball', name: '미식축구', icon: '🏈' },
     { id: 'esports', name: 'E-스포츠', icon: '🎮' },
+    { id: 'tabletennis', name: '탁구', icon: '🏓' },
+    { id: 'boxingufc', name: 'UFC/복싱', icon: '🥊' },
   ];
 
   let currentMode = $derived(

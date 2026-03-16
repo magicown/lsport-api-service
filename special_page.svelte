@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
+  import { goto, invalidateAll } from '$app/navigation';
+  import { onMount, onDestroy } from 'svelte';
   import MatchDetail from '$lib/components/MatchDetail.svelte';
 
   let { data } = $props();
@@ -9,6 +10,24 @@
   let detailData: any = $state(null);
   let loadingDetail = $state(false);
   let searchQuery = $state('');
+  let retryTimer: any;
+  let retryCount = 0;
+  let dataReady = $state(data.matches?.length > 0);
+
+  onMount(() => {
+    if (!dataReady) {
+      retryTimer = setInterval(() => {
+        retryCount++;
+        if (retryCount > 12) { clearInterval(retryTimer); retryTimer = null; dataReady = true; return; }
+        invalidateAll();
+      }, 5000);
+    }
+  });
+  onDestroy(() => { if (retryTimer) clearInterval(retryTimer); });
+  $effect(() => {
+    if (matches.length > 0 && !dataReady) dataReady = true;
+    if (filtered.length > 0 && retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+  });
 
   let filtered = $derived.by(() => {
     if (!searchQuery) return matches;
@@ -146,9 +165,12 @@
             </div>
             <div class="flex shrink-0">
               <span class="w-[80px] text-center text-xs text-tw-warning font-medium leading-[40px] truncate">{m.mn || '스페셜'}</span>
-              <span class="odds-cell {m.h ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.h || '-'}</span>
-              <span class="odds-cell {m.d ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.d || '-'}</span>
-              <span class="odds-cell {m.a ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.a || '-'}</span>
+              <div class="flex {m.ms ? 'stopped-group' : ''}">
+                {#if m.ms}<span class="stop-badge">중지</span>{/if}
+                <span class="odds-cell {m.ms ? 'stopped' : m.h ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.h || '-'}</span>
+                <span class="odds-cell {m.ms ? 'stopped' : m.d ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.d || '-'}</span>
+                <span class="odds-cell {m.ms ? 'stopped' : m.a ? 'text-tw-text-bright' : 'text-tw-text-muted'}">{m.a || '-'}</span>
+              </div>
             </div>
           </div>
         </button>
@@ -156,12 +178,22 @@
     {/each}
 
     {#if grouped.length === 0}
-      <div class="text-center text-tw-text-muted py-20 text-lg">스페셜 마켓 데이터가 없습니다</div>
+      {#if !dataReady}
+        <div class="text-center py-20">
+          <div class="inline-block w-6 h-6 border-2 border-tw-accent border-t-transparent rounded-full animate-spin mb-3"></div>
+          <div class="text-tw-text-muted text-lg">데이터를 불러오는 중입니다...</div>
+          <div class="text-tw-text-muted text-sm mt-2">잠시만 기다려주세요. 자동으로 갱신됩니다.</div>
+        </div>
+      {:else if searchQuery}
+        <div class="text-center text-tw-text-muted py-20 text-lg">검색 결과가 없습니다</div>
+      {:else}
+        <div class="text-center text-tw-text-muted py-20 text-lg">스페셜 배당이 없습니다</div>
+      {/if}
     {/if}
   </div>
 
   {#if selectedMatch}
-    <div class="w-[420px] border-l border-tw-border overflow-y-auto bg-tw-card">
+    <div class="w-1/3 min-w-[380px] border-l border-tw-border overflow-y-auto bg-tw-card">
       {#if loadingDetail}
         <div class="text-center text-tw-text-muted py-10">
           <div class="inline-block w-5 h-5 border-2 border-tw-accent border-t-transparent rounded-full animate-spin"></div>
@@ -200,5 +232,30 @@
   .odds-cell:hover {
     background-color: rgba(32, 161, 208, 0.25);
     color: #fff;
+  }
+  .odds-cell.stopped {
+    color: rgba(255, 255, 255, 0.2);
+    text-decoration: line-through;
+    pointer-events: none;
+  }
+  .stopped-group {
+    position: relative;
+    opacity: 0.5;
+  }
+  .stop-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    font-size: 10px;
+    font-weight: 700;
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    pointer-events: none;
   }
 </style>

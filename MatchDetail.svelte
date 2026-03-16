@@ -67,20 +67,32 @@
   <div class="text-tw-text-muted text-xs">{markets.length}개 마켓</div>
 
   {#each markets as mk}
-    <div class="border border-tw-border rounded-lg overflow-hidden">
-      <div class="px-3 py-1.5 bg-tw-darker border-b border-tw-border">
+    {@const mkStopped = !!(mk.stop)}
+    <div class="border border-tw-border rounded-lg overflow-hidden {mkStopped ? 'opacity-60' : ''}">
+      <div class="px-3 py-1.5 bg-tw-darker border-b border-tw-border flex items-center justify-between">
         <span class="text-tw-accent text-xs font-medium">{mk.market_name}</span>
+        {#if mkStopped}
+          <span class="text-[10px] font-bold text-red-400 bg-red-400/15 border border-red-400/30 px-1.5 py-0.5 rounded">중지</span>
+        {/if}
       </div>
       <div class="px-3 py-2 space-y-1">
         {#each mk.list || [] as line, li}
+          {@const lineStopped = mkStopped || !!(line.stop)}
           {#if mk.list.length > 1}
-            <div class="text-tw-text-muted text-xs mt-1">라인 {li + 1}</div>
+            <div class="text-tw-text-muted text-xs mt-1 flex items-center gap-1">
+              라인 {li + 1} {#if line.name}<span class="text-tw-warning">({line.name})</span>{/if}
+              {#if lineStopped && !mkStopped}
+                <span class="text-[9px] font-bold text-red-400 bg-red-400/15 px-1 rounded">중지</span>
+              {/if}
+            </div>
           {/if}
           <div class="flex flex-wrap gap-1">
             {#each line.odds || [] as odd}
-              <div class="flex-1 min-w-[4rem] border border-tw-border rounded-md px-2 py-1.5 text-center bg-tw-darker hover:bg-tw-highlight transition-colors">
-                <div class="text-tw-text-muted text-xs truncate">{odd.name || ''}</div>
-                <div class="text-tw-text-bright text-sm font-medium">{odd.value || '-'}</div>
+              {@const oddStopped = lineStopped || !!(odd.stop)}
+              <div class="flex-1 min-w-[4rem] border rounded-md px-2 py-1.5 text-center transition-colors
+                {oddStopped ? 'border-red-400/20 bg-red-950/20' : 'border-tw-border bg-tw-darker hover:bg-tw-highlight'}">
+                <div class="text-xs truncate {oddStopped ? 'text-tw-text-muted/50' : 'text-tw-text-muted'}">{odd.name || ''}</div>
+                <div class="text-sm font-medium {oddStopped ? 'text-red-400/40 line-through' : 'text-tw-text-bright'}">{odd.value || '-'}</div>
               </div>
             {/each}
           </div>
@@ -90,6 +102,6 @@
   {/each}
 
   {#if markets.length === 0}
-    <div class="text-center text-tw-text-muted text-sm py-4">마켓 데이터를 불러오는 중...</div>
+    <div class="text-center text-tw-text-muted text-sm py-4">추가 마켓이 없습니다</div>
   {/if}
 </div>

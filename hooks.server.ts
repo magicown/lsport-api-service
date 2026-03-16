@@ -1,10 +1,9 @@
 /**
- * SvelteKit Server Hooks - 3중 인증 + 레이트 리미팅 + 사용량 추적
- * API: API Key → JWT → Cookie
- * 웹 페이지: Cookie 세션 검증
+ * SvelteKit Server Hooks - 3중 인증 + CSRF 보호 + 보안 헤더 + 레이트 리미팅 + 사용량 추적
+ * API: API Key -> JWT -> Cookie
  */
 
-import type { Handle } from '@sveltejs/kit';
+import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
 import { validateSession, trackUsage } from '$lib/auth';
 import { authenticateRequest, createErrorResponse } from '$lib/middleware';
@@ -13,7 +12,10 @@ import { checkRateLimit, getRateLimitHeaders } from '$lib/rate-limiter';
 import { checkIpWhitelist } from '$lib/ip-whitelist';
 import { trackRequest } from '$lib/usage-tracker';
 import { getCacheInfo } from '$lib/api-cache';
+import { createLogger } from '$lib/logger';
 import type { PlanType } from '$lib/plan-limits';
+
+const log = createLogger('hooks');
 
 // 데이터 엔드포인트에서 종목 추출 정규식
 const SPORT_REGEX = /\/api\/(?:prematch|inplay|special|match|leagues)\/([^/]+)/;
@@ -28,6 +30,78 @@ const PUBLIC_PATHS = [
   '/api/auth/refresh',
 ];
 
+// 상태 변경 HTTP 메서드 (CSRF 체크 대상)
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// 허용된 Origin 목록
+const ALLOWED_ORIGINS = [
+  'https://matchdata.net',
+  'https://www.matchdata.net',
+  ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173', 'http://localhost:4173']),
+];
+
+// ─── 보안 헤더 (Helmet.js 대체) ───
+const SECURITY_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'X-XSS-Protection': '0',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+};
+
+// ─── CSRF 보호 ───
+function checkCsrf(event: any): boolean {
+  const method = event.request.method;
+  if (!MUTATING_METHODS.has(method)) return true;
+
+  // API Key / JWT 인증은 CSRF 면제 (쿠키 기반이 아님)
+  const hasApiKey = event.request.headers.get('x-api-key') || event.url.searchParams.get('api_key');
+  const hasBearer = event.request.headers.get('authorization')?.startsWith('Bearer ');
+  if (hasApiKey || hasBearer) return true;
+
+  // 쿠키 세션 사용 시 Origin 헤더 검증
+  const origin = event.request.headers.get('origin');
+  if (!origin) {
+    // Origin 헤더 없음 (동일 출처 요청이 아닌 경우 차단)
+    // 단, fetch API에서 same-origin 요청은 Origin을 보내지 않을 수 있음
+    // Referer로 폴백 체크
+    const referer = event.request.headers.get('referer');
+    if (referer) {
+      try {
+        const refUrl = new URL(referer);
+        const reqUrl = event.url;
+        return refUrl.origin === reqUrl.origin || ALLOWED_ORIGINS.includes(refUrl.origin);
+      } catch {
+        return false;
+      }
+    }
+    // SvelteKit 내부 요청은 통과 (SSR에서의 서버 사이드 fetch)
+    return true;
+  }
+
+  // Origin이 허용 목록 또는 자기 자신
+  return ALLOWED_ORIGINS.includes(origin) || origin === event.url.origin;
+}
+
+// ─── 글로벌 에러 핸들러 ───
+export const handleError: HandleServerError = ({ error, event, status, message }) => {
+  const errorId = crypto.randomUUID().slice(0, 8);
+  const path = event?.url?.pathname || 'unknown';
+
+  log.error('Unhandled error', {
+    errorId,
+    path,
+    status,
+    message,
+    stack: (error as Error)?.stack?.split('\n').slice(0, 3).join(' | '),
+  });
+
+  return {
+    message: `서버 오류가 발생했습니다. (ID: ${errorId})`,
+    errorId,
+  };
+};
+
 export const handle: Handle = async ({ event, resolve }) => {
   const path = event.url.pathname;
 
@@ -36,14 +110,24 @@ export const handle: Handle = async ({ event, resolve }) => {
     return resolve(event);
   }
 
+  // CSRF 체크 (모든 상태 변경 요청)
+  if (!checkCsrf(event)) {
+    log.warn('CSRF check failed', {
+      path,
+      method: event.request.method,
+      origin: event.request.headers.get('origin') || 'none',
+      ip: getClientIp(event),
+    });
+    return createErrorResponse('CSRF_REJECTED', '잘못된 요청 출처입니다.', 403);
+  }
+
   // 공개 경로 통과 (정확한 경로 매칭만)
   if (PUBLIC_PATHS.includes(path)) {
-    // API 공개 경로에는 CORS 헤더 추가
     if (path.startsWith('/api/')) {
       const response = await resolve(event);
-      return addCorsHeaders(response, event);
+      return addHeaders(response, event);
     }
-    return resolve(event);
+    return addSecurityHeaders(await resolve(event));
   }
 
   // CORS Preflight
@@ -59,9 +143,32 @@ export const handle: Handle = async ({ event, resolve }) => {
     return handleApiRequest(event, resolve);
   }
 
-  // ── 기존 웹 페이지 요청 처리 ──
+  // ── 웹 페이지 요청 처리 ──
   return handleWebRequest(event, resolve);
 };
+
+/**
+ * 클라이언트 IP 안전 추출 (역방향 프록시 고려)
+ */
+function getClientIp(event: any): string {
+  // Cloudflare
+  const cfIp = event.request.headers.get('cf-connecting-ip');
+  if (cfIp) return cfIp;
+
+  // nginx/로드밸런서
+  const realIp = event.request.headers.get('x-real-ip');
+  if (realIp) return realIp;
+
+  // x-forwarded-for (첫 번째 IP만 = 원본 클라이언트)
+  const forwarded = event.request.headers.get('x-forwarded-for');
+  if (forwarded) return forwarded.split(',')[0].trim();
+
+  try {
+    return event.getClientAddress();
+  } catch {
+    return '0.0.0.0';
+  }
+}
 
 /**
  * API 요청 핸들러
@@ -71,7 +178,7 @@ async function handleApiRequest(
   resolve: (event: any) => Promise<Response>
 ): Promise<Response> {
   const path = event.url.pathname;
-  const clientIp = event.getClientAddress();
+  const clientIp = getClientIp(event);
 
   // 1. 인증
   const auth = await authenticateRequest(event);
@@ -104,7 +211,7 @@ async function handleApiRequest(
     }
   }
 
-  // 3. 데이터 엔드포인트 판별 및 종목 추출 (1회만)
+  // 3. 데이터 엔드포인트 판별 및 종목 추출
   const isData = isDataEndpoint(path);
   const sportMatch = isData ? path.match(SPORT_REGEX) : null;
   const sport = sportMatch?.[1] || '';
@@ -118,37 +225,47 @@ async function handleApiRequest(
   }
 
   // 5. 레이트 리밋 체크
-  const identifier = auth.keyId ? `key:${auth.keyId}` : `user:${auth.userId}`;
-  const rateResult = checkRateLimit(identifier, auth.plan!, auth.userId!);
-  if (!rateResult.allowed) {
-    const headers = getRateLimitHeaders(rateResult);
-    return createErrorResponse(
-      rateResult.code!,
-      rateResult.message!,
-      429,
-      { limit: rateResult.limit, remaining: rateResult.remaining, retryAfter: rateResult.retryAfter },
-      headers
-    );
+  // 웹 내부 요청 (Cookie 세션)은 레이트 리밋 면제
+  const isWebInternal = auth.method === 'cookie';
+  let rateResult: any = { allowed: true, limit: 0, remaining: 0, resetAt: 0 };
+
+  if (!isWebInternal) {
+    const identifier = auth.keyId ? `key:${auth.keyId}` : `user:${auth.userId}`;
+    rateResult = checkRateLimit(identifier, auth.plan!, auth.userId!);
+    if (!rateResult.allowed) {
+      const headers = getRateLimitHeaders(rateResult);
+      log.warn('Rate limit exceeded', { userId: auth.userId, plan: auth.plan, path });
+      return createErrorResponse(
+        rateResult.code!,
+        rateResult.message!,
+        429,
+        { limit: rateResult.limit, remaining: rateResult.remaining, retryAfter: rateResult.retryAfter },
+        headers
+      );
+    }
   }
 
   // 6. 요청 처리
   const response = await resolve(event);
 
-  // 7. 성공 시 사용량 추적
-  if (response.status >= 200 && response.status < 400 && isData) {
+  // 7. 성공 시 사용량 추적 (외부 API만)
+  if (!isWebInternal && response.status >= 200 && response.status < 400 && isData) {
     trackRequest(auth.userId!, auth.keyId || null, path, sport);
   }
 
-  // 8. 레이트 리밋 + CORS 헤더 추가
-  const rateLimitHeaders = getRateLimitHeaders(rateResult);
+  // 8. 헤더 추가
   const newResponse = new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers: new Headers(response.headers),
   });
 
-  for (const [k, v] of Object.entries(rateLimitHeaders)) {
-    newResponse.headers.set(k, v);
+  // 레이트 리밋 헤더 (외부 API만)
+  if (!isWebInternal) {
+    const rateLimitHeaders = getRateLimitHeaders(rateResult);
+    for (const [k, v2] of Object.entries(rateLimitHeaders)) {
+      newResponse.headers.set(k, v2);
+    }
   }
 
   // 캐시 나이 헤더
@@ -161,17 +278,20 @@ async function handleApiRequest(
     }
   }
 
-  // CORS 헤더
+  // CORS + 보안 헤더
   const corsHeaders = getCorsHeaders(event);
-  for (const [k, v] of Object.entries(corsHeaders)) {
-    newResponse.headers.set(k, v);
+  for (const [k, v2] of Object.entries(corsHeaders)) {
+    newResponse.headers.set(k, v2);
+  }
+  for (const [k, v2] of Object.entries(SECURITY_HEADERS)) {
+    newResponse.headers.set(k, v2);
   }
 
   return newResponse;
 }
 
 /**
- * 기존 웹 페이지 요청 핸들러 (하위 호환)
+ * 웹 페이지 요청 핸들러
  */
 async function handleWebRequest(
   event: any,
@@ -211,19 +331,12 @@ async function handleWebRequest(
     }
   }
 
-  return resolve(event);
+  return addSecurityHeaders(await resolve(event));
 }
 
 function isDataEndpoint(path: string): boolean {
   return /\/api\/(sports|prematch|inplay|special|match|leagues)(\/|$)/.test(path);
 }
-
-// 허용된 Origin 목록
-const ALLOWED_ORIGINS = [
-  'https://matchdata.net',
-  'https://www.matchdata.net',
-  ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173', 'http://localhost:4173']),
-];
 
 function getCorsHeaders(event: any): Record<string, string> {
   const requestOrigin = event.request.headers.get('origin');
@@ -239,15 +352,24 @@ function getCorsHeaders(event: any): Record<string, string> {
   };
 }
 
-function addCorsHeaders(response: Response, event: any): Response {
+function addHeaders(response: Response, event: any): Response {
   const newResponse = new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers: new Headers(response.headers),
   });
   const cors = getCorsHeaders(event);
-  for (const [k, v] of Object.entries(cors)) {
-    newResponse.headers.set(k, v);
-  }
+  for (const [k, v2] of Object.entries(cors)) newResponse.headers.set(k, v2);
+  for (const [k, v2] of Object.entries(SECURITY_HEADERS)) newResponse.headers.set(k, v2);
+  return newResponse;
+}
+
+function addSecurityHeaders(response: Response): Response {
+  const newResponse = new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: new Headers(response.headers),
+  });
+  for (const [k, v2] of Object.entries(SECURITY_HEADERS)) newResponse.headers.set(k, v2);
   return newResponse;
 }

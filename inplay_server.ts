@@ -21,37 +21,45 @@ function findMarket(markets: any[], ids: number[]) {
 }
 
 function extract1X2(mk: any) {
-  if (!mk?.list?.[0]?.odds) return { h: '', d: '', a: '', mid: 0, on: ['Home', 'Draw', 'Away'] };
+  if (!mk?.list?.[0]?.odds) return { h: '', d: '', a: '', mid: 0, on: ['Home', 'Draw', 'Away'], ms: false };
   const mid = mk.market_id;
-  const odds = mk.list[0].odds;
+  const line = mk.list[0];
+  const odds = line.odds;
+  const ms = !!(mk.stop || line.stop);
   const ho = odds.find((o: any) => o.name === 'Home' || o.name === '1');
   const dr = odds.find((o: any) => o.name === 'Draw' || o.name === 'X');
   const aw = odds.find((o: any) => o.name === 'Away' || o.name === '2');
   return {
     h: ho?.value || '', d: dr?.value || '', a: aw?.value || '',
-    mid, on: [ho?.name || 'Home', dr?.name || 'Draw', aw?.name || 'Away'],
+    mid, on: [ho?.name || 'Home', dr?.name || 'Draw', aw?.name || 'Away'], ms,
   };
 }
 
 function extractHC(mk: any) {
-  if (!mk?.list?.[0]) return { hcl: '', hch: '', hca: '' };
-  const line = mk.list[0].name || mk.list[0].line || '';
-  const odds = mk.list[0].odds || [];
+  if (!mk?.list?.[0]) return { hcl: '', hch: '', hca: '', hcs: false };
+  const l = mk.list[0];
+  const lineName = l.name || l.line || '';
+  const odds = l.odds || [];
+  const hcs = !!(mk.stop || l.stop);
   return {
-    hcl: line,
+    hcl: lineName,
     hch: odds.find((o: any) => o.name === 'Home' || o.name === '1')?.value || '',
     hca: odds.find((o: any) => o.name === 'Away' || o.name === '2')?.value || '',
+    hcs,
   };
 }
 
 function extractOU(mk: any) {
-  if (!mk?.list?.[0]) return { oul: '', ouo: '', ouu: '' };
-  const line = mk.list[0].name || mk.list[0].line || '';
-  const odds = mk.list[0].odds || [];
+  if (!mk?.list?.[0]) return { oul: '', ouo: '', ouu: '', ous: false };
+  const l = mk.list[0];
+  const lineName = l.name || l.line || '';
+  const odds = l.odds || [];
+  const ous = !!(mk.stop || l.stop);
   return {
-    oul: line,
+    oul: lineName,
     ouo: odds.find((o: any) => o.name === 'Over')?.value || '',
     ouu: odds.find((o: any) => o.name === 'Under')?.value || '',
+    ous,
   };
 }
 
@@ -64,9 +72,9 @@ function trimForList(matches: any[], sport: string): any[] {
     const mkHC = findMarket(markets, ids.hc);
     const mkOU = findMarket(markets, ids.ou);
 
-    const { h, d, a, mid, on } = extract1X2(mk1x2);
-    const { hcl, hch, hca } = extractHC(mkHC);
-    const { oul, ouo, ouu } = extractOU(mkOU);
+    const { h, d, a, mid, on, ms } = extract1X2(mk1x2);
+    const { hcl, hch, hca, hcs } = extractHC(mkHC);
+    const { oul, ouo, ouu, ous } = extractOU(mkOU);
 
     const sh = m.score?.home?.ft ?? m.score?.home?.score ?? '';
     const sa = m.score?.away?.ft ?? m.score?.away?.score ?? '';
@@ -81,8 +89,8 @@ function trimForList(matches: any[], sport: string): any[] {
       mm: m.match_minute || '', mts: m.match_time_str || '',
       mtsec: m.match_time_seconds || 0, fat: m.fetched_at || 0,
       t: m.time || '', tu: m.time_unix || 0,
-      sh, sa, h, d, a, mid, on,
-      hcl, hch, hca, oul, ouo, ouu,
+      sh, sa, h, d, a, mid, on, ms,
+      hcl, hch, hca, hcs, oul, ouo, ouu, ous,
     };
   });
 }

@@ -7,9 +7,12 @@ import Database from 'better-sqlite3';
 import { hashSync } from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
+import { createLogger } from '$lib/logger';
 
-const DB_DIR = '/home/matchdata/data';
-const DB_PATH = path.join(DB_DIR, 'matchdata.db');
+const log = createLogger('db');
+
+const DB_DIR = process.env.DB_DIR || '/home/matchdata/data';
+const DB_PATH = path.join(DB_DIR, process.env.DB_NAME || 'matchdata.db');
 
 let db: Database.Database;
 
@@ -27,10 +30,14 @@ export function getDb(): Database.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
   db.pragma('foreign_keys = ON');
+  // WAL 체크포인트 자동 실행 임계값 (기본 1000페이지 → 4000으로 조정)
+  db.pragma('wal_autocheckpoint = 4000');
 
   initSchema();
   migrateSchema();
   seedAdmin();
+
+  log.info('Database initialized', { path: DB_PATH });
 
   return db;
 }
@@ -63,6 +70,7 @@ function initSchema() {
       key_full    TEXT NOT NULL DEFAULT '',
       label       TEXT NOT NULL DEFAULT 'Default',
       is_active   INTEGER NOT NULL DEFAULT 1,
+      expires_at  INTEGER DEFAULT NULL,
       last_used_at INTEGER,
       created_at  INTEGER NOT NULL DEFAULT (unixepoch('now') * 1000)
     );
@@ -145,7 +153,26 @@ function migrateSchema() {
     db.prepare("SELECT key_full FROM api_keys LIMIT 1").get();
   } catch {
     db.exec("ALTER TABLE api_keys ADD COLUMN key_full TEXT NOT NULL DEFAULT ''");
-    console.log('[DB] Migration: api_keys.key_full 컬럼 추가');
+    log.info('Migration: api_keys.key_full column added');
+  }
+
+  // api_keys.expires_at 컬럼 추가 (만료 기능)
+  try {
+    db.prepare("SELECT expires_at FROM api_keys LIMIT 1").get();
+  } catch {
+    db.exec("ALTER TABLE api_keys ADD COLUMN expires_at INTEGER DEFAULT NULL");
+    log.info('Migration: api_keys.expires_at column added');
+  }
+
+  // key_full 평문 삭제 (보안: DB 유출 시 키 노출 방지)
+  try {
+    const keysWithFull = db.prepare("SELECT COUNT(*) as cnt FROM api_keys WHERE key_full != ''").get() as any;
+    if (keysWithFull?.cnt > 0) {
+      db.exec("UPDATE api_keys SET key_full = '' WHERE key_full != ''");
+      log.warn('Migration: Cleared plaintext API keys from key_full column', { count: keysWithFull.cnt });
+    }
+  } catch {
+    // 무시
   }
 }
 
@@ -154,14 +181,14 @@ function seedAdmin() {
   if (!existing) {
     const adminPassword = process.env.ADMIN_SEED_PASSWORD || 'CHANGE_ME_ON_FIRST_RUN';
     if (!process.env.ADMIN_SEED_PASSWORD) {
-      console.warn('[DB] ⚠️ ADMIN_SEED_PASSWORD 미설정. 기본 비밀번호로 admin 계정을 생성합니다. 운영 환경에서는 반드시 변경해주세요.');
+      log.warn('ADMIN_SEED_PASSWORD not set. Using default password for admin account.');
     }
     const hash = hashSync(adminPassword, 12);
     db.prepare(`
       INSERT INTO users (username, email, password_hash, company, plan, status, role)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run('admin', 'admin@matchdata.net', hash, 'MatchData', 'enterprise', 'active', 'admin');
-    console.log('[DB] Admin seed 완료');
+    log.info('Admin seed completed');
   }
 }
 
@@ -192,13 +219,13 @@ export function auditLog(userId: number | null, action: string, detail: any = ''
 function startCleanupScheduler() {
   // 시작 후 10초 뒤 1회 실행
   setTimeout(() => {
-    try { cleanupOldData(); } catch (e) { console.error('[DB] 정리 에러:', e); }
+    try { cleanupOldData(); } catch (e) { log.error('Cleanup error', { error: String(e) }); }
   }, 10_000);
   // 6시간마다 반복
   setInterval(() => {
-    try { cleanupOldData(); } catch (e) { console.error('[DB] 정리 에러:', e); }
+    try { cleanupOldData(); } catch (e) { log.error('Cleanup error', { error: String(e) }); }
   }, 6 * 60 * 60 * 1000);
-  console.log('[DB] 데이터 정리 스케줄러 시작 (6시간 간격)');
+  log.info('Data cleanup scheduler started (6h interval)');
 }
 startCleanupScheduler();
 
@@ -217,4 +244,13 @@ export function cleanupOldData() {
   // 만료된 세션/리프레시 토큰 정리
   dbRun('DELETE FROM sessions WHERE expires_at < ?', now);
   dbRun('DELETE FROM refresh_tokens WHERE expires_at < ? OR revoked = 1', now);
+
+  // 만료된 API 키 비활성화
+  const expired = dbRun(
+    'UPDATE api_keys SET is_active = 0 WHERE expires_at IS NOT NULL AND expires_at < ? AND is_active = 1',
+    now
+  );
+  if (expired.changes > 0) {
+    log.info('Expired API keys deactivated', { count: expired.changes });
+  }
 }

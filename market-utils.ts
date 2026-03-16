@@ -23,34 +23,43 @@ export function findMarket(markets: any[], ids: number[]) {
 }
 
 export function extract1X2(mk: any) {
-  if (!mk?.list?.[0]?.odds) return { h: '', d: '', a: '' };
-  const odds = mk.list[0].odds;
+  if (!mk?.list?.[0]?.odds) return { h: '', d: '', a: '', stopped: false };
+  const line = mk.list[0];
+  const odds = line.odds;
+  const stopped = !!(mk.stop || line.stop);
   return {
     h: odds.find((o: any) => o.name === 'Home' || o.name === '1')?.value || '',
     d: odds.find((o: any) => o.name === 'Draw' || o.name === 'X')?.value || '',
     a: odds.find((o: any) => o.name === 'Away' || o.name === '2')?.value || '',
+    stopped,
   };
 }
 
 export function extractHC(mk: any) {
-  if (!mk?.list?.[0]) return { hcl: '', hch: '', hca: '' };
-  const line = mk.list[0].name || mk.list[0].line || '';
-  const odds = mk.list[0].odds || [];
+  if (!mk?.list?.[0]) return { hcl: '', hch: '', hca: '', stopped: false };
+  const l = mk.list[0];
+  const lineName = l.name || l.line || '';
+  const odds = l.odds || [];
+  const stopped = !!(mk.stop || l.stop);
   return {
-    hcl: line,
+    hcl: lineName,
     hch: odds.find((o: any) => o.name === 'Home' || o.name === '1')?.value || '',
     hca: odds.find((o: any) => o.name === 'Away' || o.name === '2')?.value || '',
+    stopped,
   };
 }
 
 export function extractOU(mk: any) {
-  if (!mk?.list?.[0]) return { oul: '', ouo: '', ouu: '' };
-  const line = mk.list[0].name || mk.list[0].line || '';
-  const odds = mk.list[0].odds || [];
+  if (!mk?.list?.[0]) return { oul: '', ouo: '', ouu: '', stopped: false };
+  const l = mk.list[0];
+  const lineName = l.name || l.line || '';
+  const odds = l.odds || [];
+  const stopped = !!(mk.stop || l.stop);
   return {
-    oul: line,
+    oul: lineName,
     ouo: odds.find((o: any) => o.name === 'Over')?.value || '',
     ouu: odds.find((o: any) => o.name === 'Under')?.value || '',
+    stopped,
   };
 }
 
@@ -65,9 +74,9 @@ export function trimForList(matches: any[], sport: string): any[] {
     const mkHC = findMarket(markets, ids.hc);
     const mkOU = findMarket(markets, ids.ou);
 
-    const { h, d, a } = extract1X2(mk1x2);
-    const { hcl, hch, hca } = extractHC(mkHC);
-    const { oul, ouo, ouu } = extractOU(mkOU);
+    const { h, d, a, stopped: ms } = extract1X2(mk1x2);
+    const { hcl, hch, hca, stopped: hcs } = extractHC(mkHC);
+    const { oul, ouo, ouu, stopped: ous } = extractOU(mkOU);
 
     const sh = m.score?.home?.ft ?? m.score?.home?.score ?? '';
     const sa = m.score?.away?.ft ?? m.score?.away?.score ?? '';
@@ -79,7 +88,7 @@ export function trimForList(matches: any[], sport: string): any[] {
       hn: m.home_name, an: m.away_name,
       hi: m.home_image || '', ai: m.away_image || '',
       sk: m.status_kr || '', t: m.time || '', tu: m.time_unix || 0,
-      sh, sa, h, d, a, hcl, hch, hca, oul, ouo, ouu,
+      sh, sa, h, d, a, ms, hcl, hch, hca, hcs, oul, ouo, ouu, ous,
     };
   });
 }
