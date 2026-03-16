@@ -7,10 +7,14 @@
 import type { RequestHandler } from './$types';
 import { getPrematch, getInplay, getSpecial } from '$lib/api-cache';
 import { ALL_SPORTS } from '$lib/plan-limits';
+import { safeInt, safeString } from '$lib/validator';
+
+const VALID_TYPES = ['all', 'prematch', 'inplay', 'special'] as const;
+const VALID_FORMATS = ['default', 'api'] as const;
 
 export const GET: RequestHandler = async ({ params, url }) => {
   const sport = params.sport;
-  const matchId = parseInt(params.id, 10);
+  const matchId = safeInt(params.id, 0, 1);
 
   if (!ALL_SPORTS.includes(sport as any)) {
     return Response.json({
@@ -18,14 +22,19 @@ export const GET: RequestHandler = async ({ params, url }) => {
     }, { status: 400 });
   }
 
-  if (isNaN(matchId)) {
+  if (matchId <= 0) {
     return Response.json({
       error: { code: 'VALIDATION_ERROR', message: '유효하지 않은 경기 ID입니다.' }
     }, { status: 400 });
   }
 
   // prematch, inplay, special 모두 검색
-  const type = url.searchParams.get('type') || 'all';
+  const type = safeString(url.searchParams.get('type'), 20) || 'all';
+  if (!VALID_TYPES.includes(type as any)) {
+    return Response.json({
+      error: { code: 'VALIDATION_ERROR', message: `type은 [${VALID_TYPES.join(', ')}] 중 하나여야 합니다.` }
+    }, { status: 400 });
+  }
 
   let match: any = null;
 
@@ -46,7 +55,8 @@ export const GET: RequestHandler = async ({ params, url }) => {
   }
 
   // format=api: 외부 API용 정형화된 응답
-  if (url.searchParams.get('format') === 'api') {
+  const format = safeString(url.searchParams.get('format'), 10) || 'default';
+  if (format === 'api') {
     return Response.json({
       success: true,
       data: {

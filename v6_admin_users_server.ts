@@ -4,6 +4,10 @@
 
 import type { RequestHandler } from './$types';
 import { dbAll, dbGet } from '$lib/db';
+import { safeInt, safeString } from '$lib/validator';
+
+const VALID_STATUS = ['pending', 'active', 'suspended', 'rejected'];
+const VALID_PLAN = ['free', 'standard', 'premium', 'enterprise'];
 
 export const GET: RequestHandler = async ({ locals, url }) => {
   if (locals.role !== 'admin') {
@@ -12,11 +16,23 @@ export const GET: RequestHandler = async ({ locals, url }) => {
     }, { status: 403 });
   }
 
-  const status = url.searchParams.get('status');
-  const plan = url.searchParams.get('plan');
-  const search = url.searchParams.get('search');
-  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '20', 10)));
+  const status = safeString(url.searchParams.get('status'), 20) || null;
+  const plan = safeString(url.searchParams.get('plan'), 20) || null;
+  const search = safeString(url.searchParams.get('search'), 100) || null;
+  const page = safeInt(url.searchParams.get('page'), 1, 1, 10000);
+  const limit = safeInt(url.searchParams.get('limit'), 20, 1, 100);
+
+  // enum 검증
+  if (status && !VALID_STATUS.includes(status)) {
+    return Response.json({
+      error: { code: 'VALIDATION_ERROR', message: `status는 [${VALID_STATUS.join(', ')}] 중 하나여야 합니다.` }
+    }, { status: 400 });
+  }
+  if (plan && !VALID_PLAN.includes(plan)) {
+    return Response.json({
+      error: { code: 'VALIDATION_ERROR', message: `plan은 [${VALID_PLAN.join(', ')}] 중 하나여야 합니다.` }
+    }, { status: 400 });
+  }
 
   let where = 'WHERE 1=1';
   const params: any[] = [];

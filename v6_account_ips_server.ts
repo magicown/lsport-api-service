@@ -7,6 +7,7 @@ import { dbGet } from '$lib/db';
 import { getIpList, addIp } from '$lib/ip-whitelist';
 import { auditLog } from '$lib/db';
 import type { PlanType } from '$lib/plan-limits';
+import { safeString } from '$lib/validator';
 
 export const GET: RequestHandler = async ({ locals, request }) => {
   const userId = locals.userId;
@@ -39,8 +40,9 @@ export const POST: RequestHandler = async ({ locals, request }) => {
       ip = normalizeIp(request.headers.get('x-real-ip') || request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || '127.0.0.1');
     }
 
+    const desc = safeString(description, 200);
     const user = dbGet<any>('SELECT plan FROM users WHERE id = ?', userId);
-    const result = addIp(userId, ip, description || '', user.plan as PlanType);
+    const result = addIp(userId, ip, desc, user.plan as PlanType);
 
     if (!result.success) {
       return Response.json({

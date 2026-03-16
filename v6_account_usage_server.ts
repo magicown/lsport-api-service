@@ -7,6 +7,7 @@ import { getDailyUsage, getHourlyUsage, getEndpointUsage, getUsageSummary } from
 import { PLAN_LIMITS } from '$lib/plan-limits';
 import { dbGet } from '$lib/db';
 import type { PlanType } from '$lib/plan-limits';
+import { safeString, isValidDate } from '$lib/validator';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
   const userId = locals.userId;
@@ -17,8 +18,20 @@ export const GET: RequestHandler = async ({ locals, url }) => {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const from = url.searchParams.get('from') || today;
-  const to = url.searchParams.get('to') || today;
+  const from = safeString(url.searchParams.get('from'), 10) || today;
+  const to = safeString(url.searchParams.get('to'), 10) || today;
+
+  // 날짜 형식 검증
+  if (!isValidDate(from) || !isValidDate(to)) {
+    return Response.json({
+      error: { code: 'VALIDATION_ERROR', message: 'from/to는 YYYY-MM-DD 형식이어야 합니다.' }
+    }, { status: 400 });
+  }
+  if (from > to) {
+    return Response.json({
+      error: { code: 'VALIDATION_ERROR', message: 'from은 to보다 이전 날짜여야 합니다.' }
+    }, { status: 400 });
+  }
 
   const user = dbGet<any>('SELECT plan FROM users WHERE id = ?', userId);
   const limits = PLAN_LIMITS[user.plan as PlanType];

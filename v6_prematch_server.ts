@@ -10,6 +10,7 @@ import type { RequestHandler } from './$types';
 import { getPrematch, getPrematchUpdates, getCacheInfo } from '$lib/api-cache';
 import { formatMatchForApi } from '$lib/market-utils';
 import { ALL_SPORTS } from '$lib/plan-limits';
+import { safeInt } from '$lib/validator';
 
 export const GET: RequestHandler = async ({ params, url }) => {
   const sport = params.sport;
@@ -25,8 +26,8 @@ export const GET: RequestHandler = async ({ params, url }) => {
 
   // ── 업데이트 모드: since 파라미터가 있으면 변경분만 반환 ──
   if (sinceParam) {
-    const since = parseInt(sinceParam, 10);
-    if (isNaN(since) || since < 0) {
+    const since = safeInt(sinceParam, -1, 0);
+    if (since < 0) {
       return Response.json({
         error: { code: 'INVALID_PARAM', message: 'since는 Unix timestamp(ms)여야 합니다.' }
       }, { status: 400 });
@@ -56,16 +57,16 @@ export const GET: RequestHandler = async ({ params, url }) => {
   }
 
   // ── 전체 모드 (기본) ──
-  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '50', 10)));
+  const page = safeInt(url.searchParams.get('page'), 1, 1, 10000);
+  const limit = safeInt(url.searchParams.get('limit'), 50, 1, 100);
   const leagueId = url.searchParams.get('league_id');
 
   let matches = getPrematch(sport);
 
   // 리그 필터
   if (leagueId) {
-    const lid = parseInt(leagueId, 10);
-    matches = matches.filter((m: any) => m.league_id === lid);
+    const lid = safeInt(leagueId, 0, 1);
+    if (lid > 0) matches = matches.filter((m: any) => m.league_id === lid);
   }
 
   const total = matches.length;

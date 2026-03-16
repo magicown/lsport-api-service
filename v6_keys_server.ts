@@ -7,6 +7,7 @@ import { dbGet, dbAll, dbRun, auditLog } from '$lib/db';
 import { generateApiKey } from '$lib/api-key';
 import { PLAN_LIMITS } from '$lib/plan-limits';
 import type { PlanType } from '$lib/plan-limits';
+import { safeString, safeInt } from '$lib/validator';
 
 export const GET: RequestHandler = async ({ locals }) => {
   const userId = locals.userId;
@@ -63,9 +64,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
   let expiresInDays: number | null = null;
   try {
     const body = await request.json();
-    if (body.label) label = String(body.label).slice(0, 50);
-    if (body.expiresInDays && Number.isInteger(body.expiresInDays) && body.expiresInDays > 0) {
-      expiresInDays = Math.min(body.expiresInDays, 365); // 최대 1년
+    if (body.label) label = safeString(String(body.label), 50) || 'Default';
+    if (body.expiresInDays != null) {
+      const days = safeInt(String(body.expiresInDays), 0, 1, 365);
+      if (days > 0) expiresInDays = days;
     }
   } catch { /* body 없어도 OK */ }
 

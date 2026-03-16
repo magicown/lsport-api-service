@@ -4,6 +4,7 @@
 
 import type { RequestHandler } from './$types';
 import { dbAll } from '$lib/db';
+import { safeInt, safeString, isValidDate } from '$lib/validator';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
   if (locals.role !== 'admin') {
@@ -12,17 +13,29 @@ export const GET: RequestHandler = async ({ locals, url }) => {
     }, { status: 403 });
   }
 
-  const userId = url.searchParams.get('user_id');
   const today = new Date().toISOString().slice(0, 10);
-  const from = url.searchParams.get('from') || today;
-  const to = url.searchParams.get('to') || today;
+  const from = safeString(url.searchParams.get('from'), 10) || today;
+  const to = safeString(url.searchParams.get('to'), 10) || today;
+
+  // 날짜 형식 검증
+  if (!isValidDate(from) || !isValidDate(to)) {
+    return Response.json({
+      error: { code: 'VALIDATION_ERROR', message: 'from/to는 YYYY-MM-DD 형식이어야 합니다.' }
+    }, { status: 400 });
+  }
+  if (from > to) {
+    return Response.json({
+      error: { code: 'VALIDATION_ERROR', message: 'from은 to보다 이전 날짜여야 합니다.' }
+    }, { status: 400 });
+  }
 
   let where = 'WHERE ud.date >= ? AND ud.date <= ?';
   const params: any[] = [from, to];
 
-  if (userId) {
-    const parsedUserId = parseInt(userId, 10);
-    if (isNaN(parsedUserId) || parsedUserId <= 0) {
+  const userIdParam = url.searchParams.get('user_id');
+  if (userIdParam) {
+    const parsedUserId = safeInt(userIdParam, 0, 1);
+    if (parsedUserId === 0) {
       return Response.json({
         error: { code: 'VALIDATION_ERROR', message: '올바른 사용자 ID가 필요합니다.' }
       }, { status: 400 });

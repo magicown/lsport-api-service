@@ -9,6 +9,7 @@
 import type { RequestHandler } from './$types';
 import { getSpecial, getSpecialUpdates, getCacheInfo } from '$lib/api-cache';
 import { ALL_SPORTS } from '$lib/plan-limits';
+import { safeInt } from '$lib/validator';
 
 function formatSpecialMatch(m: any, sport: string) {
   return {
@@ -52,8 +53,8 @@ export const GET: RequestHandler = async ({ params, url }) => {
 
   // ── 업데이트 모드 ──
   if (sinceParam) {
-    const since = parseInt(sinceParam, 10);
-    if (isNaN(since) || since < 0) {
+    const since = safeInt(sinceParam, -1, 0);
+    if (since < 0) {
       return Response.json({
         error: { code: 'INVALID_PARAM', message: 'since는 Unix timestamp(ms)여야 합니다.' }
       }, { status: 400 });
@@ -83,8 +84,8 @@ export const GET: RequestHandler = async ({ params, url }) => {
   }
 
   // ── 전체 모드 ──
-  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '50', 10)));
+  const page = safeInt(url.searchParams.get('page'), 1, 1, 10000);
+  const limit = safeInt(url.searchParams.get('limit'), 50, 1, 100);
 
   const allMatches = getSpecial(sport);
 
