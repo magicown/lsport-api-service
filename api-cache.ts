@@ -5,7 +5,7 @@
  * 전체 데이터 + 업데이트 추적 (since 파라미터 지원)
  */
 
-const TOKEN = process.env.API77_TOKEN || 'YOUR_API_TOKEN';
+const TOKEN = process.env.API77_TOKEN || 'pGbmTHt1vkvITi62AbRiNQHZyhAQmLi';
 const PREMATCH_URL = 'https://v6.api-77.com';
 const INPLAY_URL = 'https://v6_i.api-77.com/inplay';
 
@@ -28,6 +28,7 @@ interface CacheEntry {
 // 메모리 캐시
 const prematchCache = new Map<string, CacheEntry>();
 const inplayCache = new Map<string, CacheEntry>();
+const inplayRawCache = new Map<string, any[]>(); // sport → raw api-77 compact 배열 (relay_service용)
 // 삭제된 경기 추적 (since 조회 시 "삭제됨" 알려주기 위해)
 const removedMatches = new Map<string, Map<number | string, number>>(); // sport → {matchId → removedAt}
 let initialized = false;
@@ -177,29 +178,35 @@ function transformInplayMatch(raw: any, sport: string): any {
   };
 }
 
-async function fetchInplay(sport: string): Promise<any[]> {
+async function fetchInplay(sport: string): Promise<{ transformed: any[], raw: any[] }> {
   try {
     const url = `${INPLAY_URL}/${sport}?token=${TOKEN}`;
     const res = await fetch(url);
-    if (!res.ok) return [];
+    if (!res.ok) return { transformed: [], raw: [] };
 
     const data = await res.json();
     if (!data?.success) {
       console.error(`Inplay API error [${sport}]:`, data?.error || 'unknown');
-      return [];
+      return { transformed: [], raw: [] };
     }
     const rawList = data?.result || [];
     console.log(`[Inplay] ${sport} raw: ${rawList.length} matches`);
-    return rawList.map((raw: any) => {
+
+    // raw에 sport, id 필드 주입 (relay_service 호환용)
+    const raw = rawList.map((r: any) => ({ ...r, sport, id: r.g }));
+
+    const transformed = rawList.map((r: any) => {
       try {
-        return transformInplayMatch(raw, sport);
+        return transformInplayMatch(r, sport);
       } catch (e) {
         console.error(`Transform error [${sport}]:`, e);
         return null;
       }
     }).filter(Boolean);
+
+    return { transformed, raw };
   } catch {
-    return [];
+    return { transformed: [], raw: [] };
   }
 }
 
@@ -222,8 +229,9 @@ async function refreshInplay() {
   try {
     const promises = SPORTS.map(async (sport) => {
       try {
-        const data = await fetchInplay(sport);
-        updateCache(inplayCache, removedMatches, sport, data);
+        const { transformed, raw } = await fetchInplay(sport);
+        updateCache(inplayCache, removedMatches, sport, transformed);
+        inplayRawCache.set(sport, raw); // raw는 단순 교체 (변경추적 불필요)
       } catch (e) {
         console.error(`Inplay refresh error [${sport}]:`, e);
       }
@@ -383,3 +391,102 @@ export function getCacheInfo(sport: string, type: 'prematch' | 'inplay') {
     age: entry ? Date.now() - entry.updatedAt : -1
   };
 }
+
+// ────── relay_service 호환 API ──────
+
+/** relay_service/inplay.php 용 — raw compact 데이터 반환 */
+export function getInplayRaw(sport: string): any[] {
+  return inplayRawCache.get(sport) || [];
+}
+
+export function getAllInplayRaw(): any[] {
+  const all: any[] = [];
+  for (const [, list] of inplayRawCache) all.push(...list);
+  return all;
+}
+
+/** relay_service/relay.php 용 — ID 배치 조회 (prematch + inplay 통합) */
+export function getMatchesByIds(sport: string, ids: (number | string)[]): any[] {
+  const idSet = new Set(ids.map(Number));
+  const results: any[] = [];
+
+  // prematch 캐시 검색
+  const pm = prematchCache.get(sport);
+  if (pm) {
+    for (const [, entry] of pm.matches) {
+      const mid = entry.data.id || entry.data.prematch_id;
+      if (idSet.has(mid)) results.push(entry.data);
+    }
+  }
+  // inplay 캐시 검색 (transformed - flat 형식)
+  const ip = inplayCache.get(sport);
+  if (ip) {
+    for (const [, entry] of ip.matches) {
+      const mid = entry.data.id || entry.data.inplay_id;
+      if (idSet.has(mid) && !results.find(r => (r.id || r.prematch_id) === mid)) {
+        results.push(entry.data);
+      }
+    }
+  }
+  return results;
+}
+
+/** relay_service/relay_all.php 용 — 프리매치 페이지네이션 + status 필터 */
+export function getPrematchPaginated(sport: string, page: number, pageSize: number, statusFilter?: number) {
+  let all = getPrematch(sport);
+  if (statusFilter !== undefined) {
+    all = all.filter((m: any) => m.status_id === statusFilter);
+  }
+  const total = all.length;
+  const totalPages = Math.ceil(total / pageSize) || 1;
+  const offset = (page - 1) * pageSize;
+  const list = all.slice(offset, offset + pageSize);
+  return { list, pagination: { total, total_pages: totalPages } };
+}
+
+/** relay_service/relay_latest_all.php 용 — 전종목 최근 변경분 */
+export function getRecentAllSports(tsSeconds: number, bettype: string = 'multi'): Record<string, any[]> {
+  const since = Date.now() - (tsSeconds * 1000);
+  const data: Record<string, any[]> = {};
+
+  for (const sport of SPORTS) {
+    const matches: any[] = [];
+
+    // prematch 캐시에서 변경분
+    const pmEntry = prematchCache.get(sport);
+    if (pmEntry) {
+      for (const [, me] of pmEntry.matches) {
+        if (me.changedAt > since) {
+          matches.push({ ...me.data, is_inplay_ing: 0, bet_type: bettype });
+        }
+      }
+    }
+    // inplay 캐시에서 변경분 (flat 형식)
+    const ipEntry = inplayCache.get(sport);
+    if (ipEntry) {
+      for (const [, me] of ipEntry.matches) {
+        if (me.changedAt > since) {
+          matches.push({ ...me.data, is_inplay_ing: 1, bet_type: bettype });
+        }
+      }
+    }
+
+    // bettype 필터링
+    if (bettype === 'special') {
+      const sportMainIds = new Set(MAIN_MARKET_IDS[sport] || []);
+      const filtered = matches
+        .map(m => {
+          const specialMarkets = (m.market || []).filter((mk: any) => !sportMainIds.has(mk.market_id));
+          if (specialMarkets.length === 0) return null;
+          return { ...m, market: specialMarkets };
+        })
+        .filter(Boolean);
+      if (filtered.length > 0) data[sport] = filtered;
+    } else {
+      if (matches.length > 0) data[sport] = matches;
+    }
+  }
+  return data;
+}
+
+export { SPORTS };

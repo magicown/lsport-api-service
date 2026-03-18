@@ -225,7 +225,7 @@ async function handleWebRequest(
 }
 
 function isDataEndpoint(path: string): boolean {
-  return /\/api\/(sports|prematch|inplay|special|match|leagues)(\/|$)/.test(path);
+  return /\/api\/(sports|prematch|inplay|special|match|leagues|relay_service)(\/|$)/.test(path);
 }
 
 // 허용된 Origin 목록

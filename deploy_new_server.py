@@ -3,7 +3,7 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect('172.238.12.233', username='root', password='EhfLRguCw7rMWGH', timeout=30)
+ssh.connect('172.105.26.83', username='root', password='EhfLRguCw7rMWGH', timeout=30)
 sftp = ssh.open_sftp()
 
 # ── Step 1: 프로젝트 기본 구조 생성 ──
@@ -45,6 +45,12 @@ dirs = [
     '/home/lsportodds/src/routes/api/admin/users',
     '/home/lsportodds/src/routes/api/admin/stats',
     '/home/lsportodds/src/routes/api/admin/usage',
+    # relay_service 엔드포인트 (Ganzi 호환)
+    '/home/lsportodds/src/routes/api/relay_service/relay_latest_all.php',
+    '/home/lsportodds/src/routes/api/relay_service/relay.php',
+    '/home/lsportodds/src/routes/api/relay_service/relay_all.php',
+    '/home/lsportodds/src/routes/api/relay_service/inplay.php',
+    '/home/lsportodds/src/routes/api/relay_service/inplay_match.php',
     '/home/lsportodds/data',
     '/home/lsportodds/static',
 ]
@@ -57,7 +63,7 @@ print(f'Created {len(dirs)} directories')
 # ── Step 2: 소스 파일 업로드 ──
 print('\n=== Step 2: Uploading source files ===')
 
-BASE = 'C:/server/판도라/api77/svelte_files'
+BASE = 'C:/server/matchdata-api/svelte_files'
 
 files = {
     # ── 페이지 파일 ──
@@ -125,6 +131,13 @@ files = {
     'v6_admin_users_id_server.ts': '/home/lsportodds/src/routes/api/admin/users/[id]/+server.ts',
     'v6_admin_stats_server.ts': '/home/lsportodds/src/routes/api/admin/stats/+server.ts',
     'v6_admin_usage_server.ts': '/home/lsportodds/src/routes/api/admin/usage/+server.ts',
+
+    # relay_service 엔드포인트 (Ganzi 호환)
+    'relay_latest_all_server.ts': '/home/lsportodds/src/routes/api/relay_service/relay_latest_all.php/+server.ts',
+    'relay_server.ts': '/home/lsportodds/src/routes/api/relay_service/relay.php/+server.ts',
+    'relay_all_server.ts': '/home/lsportodds/src/routes/api/relay_service/relay_all.php/+server.ts',
+    'relay_inplay_server.ts': '/home/lsportodds/src/routes/api/relay_service/inplay.php/+server.ts',
+    'relay_inplay_match_server.ts': '/home/lsportodds/src/routes/api/relay_service/inplay_match.php/+server.ts',
 }
 
 ok = 0
