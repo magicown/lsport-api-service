@@ -66,8 +66,8 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimit> = {
     monthlyPrice: 149,
   },
   enterprise: {
-    ratePerMinute: 120,
-    dailyLimit: 200000,
+    ratePerMinute: 240,
+    dailyLimit: 400000,
     maxKeys: 10,
     maxIps: 9999,  // 사실상 무제한
     ipRequired: true,
